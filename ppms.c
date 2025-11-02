@@ -1,106 +1,71 @@
-/*
-  Petrol Pump Management System (C)
-  Implements:
-  - Fuel inventory management (Petrol, Diesel, CNG)
-  - 6 pumps (2 petrol, 2 diesel, 2 CNG) with status
-  - Sales transactions with dynamic storage (calloc + realloc)
-  - Transaction ID generation, vehicle & payment types, qty/amount entry
-  - Automatic inventory updates, supply addition
-  - Revenue tracking: fuel-wise, pump-wise, hour-wise, payment-mode-wise
-  - Daily report generation
-  - Proper memory allocation/deallocation
-  - Uses structures, pointer-based functions, static variables where required
-
-  Compile: gcc -std=c99 -Wall -Wextra -o petrol_pump petrol_pump.c
-*/
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
-/* --------------------------- Constants & Types --------------------------- */
-
 #define INITIAL_TX_CAPACITY 50
 #define PUMP_COUNT 6
 
-/* Fuel price units */
-#define PRICE_PETROL 102.50   /* ₹ per liter */
-#define PRICE_DIESEL 88.75    /* ₹ per liter */
-#define PRICE_CNG 75.00       /* ₹ per kg */
+#define PRICE_PETROL 102.50
+#define PRICE_DIESEL 88.75
+#define PRICE_CNG 75.00
 
-/* Opening stock */
-#define OPEN_PETROL 50000.0   /* liters */
-#define OPEN_DIESEL 50000.0   /* liters */
-#define OPEN_CNG 20000.0      /* kg */
+#define OPEN_PETROL 50000.0
+#define OPEN_DIESEL 50000.0
+#define OPEN_CNG 20000.0
 
-/* Low stock threshold */
 #define LOW_STOCK_THRESHOLD 5000.0
 
-/* Enums */
 typedef enum { FUEL_PETROL = 0, FUEL_DIESEL = 1, FUEL_CNG = 2 } FuelType;
 typedef enum { PUMP_ACTIVE = 0, PUMP_INACTIVE = 1, PUMP_MAINT = 2 } PumpStatus;
 typedef enum { VEH_2W = 0, VEH_4W = 1, VEH_COMM = 2 } VehicleType;
 typedef enum { PAY_CASH = 0, PAY_CARD = 1, PAY_WALLET = 2 } PaymentMode;
 
-/* Structures */
 typedef struct {
     FuelType type;
-    double price;       /* price per unit (litre or kg) */
+    double price;
     double opening_stock;
     double current_stock;
-    double closing_stock; /* for daily report */
+    double closing_stock;
 } Fuel;
 
 typedef struct {
-    int pump_id;        /* unique pump id (1..PUMP_COUNT) */
+    int pump_id;
     FuelType fuel_type;
     PumpStatus status;
-    /* performance metrics */
-    int transactions_count;
-    double total_quantity; /* total quantity dispensed */
-    double total_amount;   /* total revenue from this pump */
+    double transactions_count;
+    double total_quantity;
+    double total_amount;
 } Pump;
 
 typedef struct {
-    char txn_id[32];    /* string id */
-    time_t timestamp;   /* time of transaction */
+    char txn_id[32];
+    time_t timestamp;
     int pump_id;
     FuelType fuel_type;
     VehicleType vehicle_type;
-    double quantity;    /* quantity sold (litres or kg) */
-    double amount;      /* amount billed (₹) */
+    double quantity;
+    double amount;
     PaymentMode payment_mode;
 } Transaction;
 
-/* --------------------------- Global System State -------------------------- */
-
-/* Fuel inventory (3 types) */
 Fuel fuels[3];
 
-/* Pumps */
 Pump pumps[PUMP_COUNT];
 
-/* Dynamic transaction array */
 Transaction *transactions = NULL;
 size_t tx_capacity = 0;
 size_t tx_count = 0;
 
-/* Revenue & tracking accumulators (using static variables in functions as required) */
-/* But also maintain global accumulators for reporting */
 double fuel_wise_quantity[3] = {0.0, 0.0, 0.0};
 double fuel_wise_amount[3] = {0.0, 0.0, 0.0};
 
-double payment_mode_amount[3] = {0.0, 0.0, 0.0}; /* cash, card, wallet */
+double payment_mode_amount[3] = {0.0, 0.0, 0.0};
 
-/* Hour-wise tracking: 0..23 */
 double hour_quantity[24] = {0};
 double hour_amount[24] = {0};
 
-/* Transaction ID / sequence */
-static unsigned long txn_sequence = 0; /* static to persist across calls */
-
-/* --------------------------- Utility Functions --------------------------- */
+static unsigned long txn_sequence = 0;
 
 const char* fuel_name(FuelType f) {
     switch (f) {
@@ -134,18 +99,15 @@ const char* payment_name(PaymentMode p) {
     }
 }
 
-/* Format current local time as string */
 void format_time_local(time_t t, char *buf, size_t bufsz) {
     struct tm *lt = localtime(&t);
     if (lt != NULL) {
         strftime(buf, bufsz, "%Y-%m-%d %H:%M:%S", lt);
     } else {
-        /* fallback */
         snprintf(buf, bufsz, "unknown-time");
     }
 }
 
-/* Generate transaction ID (string) */
 void generate_txn_id(char *out, size_t outsz) {
     time_t now = time(NULL);
     struct tm *lt = localtime(&now);
@@ -162,9 +124,7 @@ void generate_txn_id(char *out, size_t outsz) {
     }
 }
 
-/* Initialize fuels and pumps */
 void initialize_system() {
-    /* Fuels */
     fuels[FUEL_PETROL].type = FUEL_PETROL;
     fuels[FUEL_PETROL].price = PRICE_PETROL;
     fuels[FUEL_PETROL].opening_stock = OPEN_PETROL;
@@ -183,7 +143,6 @@ void initialize_system() {
     fuels[FUEL_CNG].current_stock = OPEN_CNG;
     fuels[FUEL_CNG].closing_stock = OPEN_CNG;
 
-    /* Pumps: assign 2 petrol, 2 diesel, 2 cng */
     for (int i = 0; i < PUMP_COUNT; ++i) {
         pumps[i].pump_id = i + 1;
         pumps[i].transactions_count = 0;
@@ -195,7 +154,6 @@ void initialize_system() {
         else pumps[i].fuel_type = FUEL_CNG;
     }
 
-    /* Transactions: allocate initial capacity with calloc */
     tx_capacity = INITIAL_TX_CAPACITY;
     transactions = (Transaction*) calloc(tx_capacity, sizeof(Transaction));
     if (!transactions) {
@@ -204,7 +162,6 @@ void initialize_system() {
     }
 }
 
-/* Free resources */
 void shutdown_system() {
     if (transactions) free(transactions);
     transactions = NULL;
@@ -212,14 +169,12 @@ void shutdown_system() {
     tx_count = 0;
 }
 
-/* Resize transaction array when necessary (algorithm: double capacity) */
 void ensure_tx_capacity() {
     if (tx_count < tx_capacity) return;
     size_t new_capacity = tx_capacity * 2;
     Transaction *new_block = (Transaction*) realloc(transactions, new_capacity * sizeof(Transaction));
     if (!new_block) {
         fprintf(stderr, "Failed to expand transaction storage to %zu records.\n", new_capacity);
-        /* try small increment as fallback */
         new_capacity = tx_capacity + 50;
         new_block = (Transaction*) realloc(transactions, new_capacity * sizeof(Transaction));
         if (!new_block) {
@@ -228,20 +183,17 @@ void ensure_tx_capacity() {
             exit(EXIT_FAILURE);
         }
     }
-    /* Zero initialize the newly allocated portion */
     memset(new_block + tx_capacity, 0, (new_capacity - tx_capacity) * sizeof(Transaction));
     transactions = new_block;
     tx_capacity = new_capacity;
 }
 
-/* Find pump index by pump id */
 int pump_index_by_id(int pump_id) {
     for (int i = 0; i < PUMP_COUNT; ++i)
         if (pumps[i].pump_id == pump_id) return i;
     return -1;
 }
 
-/* Low stock check */
 void check_low_stock_alerts() {
     for (int i = 0; i < 3; ++i) {
         if (fuels[i].current_stock < LOW_STOCK_THRESHOLD) {
@@ -251,7 +203,6 @@ void check_low_stock_alerts() {
     }
 }
 
-/* Print a receipt for a transaction */
 void print_receipt(const Transaction *t) {
     char timestr[64];
     format_time_local(t->timestamp, timestr, sizeof(timestr));
@@ -267,15 +218,11 @@ void print_receipt(const Transaction *t) {
     printf("----------------------------------------------------\n\n");
 }
 
-/* --------------------------- Core Operations ----------------------------- */
-
-/* Create & store a transaction. Handles dynamic allocation and updates all stats. */
 void record_transaction(const Transaction *tx) {
     ensure_tx_capacity();
-    transactions[tx_count] = *tx; /* struct copy */
+    transactions[tx_count] = *tx;
     tx_count++;
 
-    /* Update pump stats */
     int pidx = pump_index_by_id(tx->pump_id);
     if (pidx >= 0) {
         pumps[pidx].transactions_count += 1;
@@ -283,14 +230,11 @@ void record_transaction(const Transaction *tx) {
         pumps[pidx].total_amount += tx->amount;
     }
 
-    /* Update fuel-wise accumulators */
     fuel_wise_quantity[tx->fuel_type] += tx->quantity;
     fuel_wise_amount[tx->fuel_type] += tx->amount;
 
-    /* Update payment mode totals */
     payment_mode_amount[tx->payment_mode] += tx->amount;
 
-    /* Update hour-wise data */
     struct tm *lt = localtime(&tx->timestamp);
     if (lt != NULL) {
         int hour = lt->tm_hour;
@@ -299,15 +243,12 @@ void record_transaction(const Transaction *tx) {
     }
 }
 
-/* Helper to clear input buffer (reads until newline or EOF) */
 void clear_input_buffer(void) {
     int ch;
     while ((ch = getchar()) != '\n' && ch != EOF) {
-        /* discard */
     }
 }
 
-/* Process a sale: select pump, vehicle, fuel, input qty or amount, create txn, deduct stock */
 void process_sale() {
     int pump_id;
     printf("\nAvailable Pumps:\n");
@@ -327,7 +268,6 @@ void process_sale() {
     if (pidx < 0) { printf("Invalid pump id.\n"); clear_input_buffer(); return; }
     if (pumps[pidx].status != PUMP_ACTIVE) { printf("Selected pump is not active.\n"); clear_input_buffer(); return; }
 
-    /* vehicle selection */
     int vchoice;
     printf("Select vehicle type: 0=2-Wheeler, 1=4-Wheeler, 2=Commercial: ");
     if (scanf("%d", &vchoice) != 1 || vchoice < 0 || vchoice > 2) {
@@ -339,7 +279,6 @@ void process_sale() {
     FuelType ftype = pumps[pidx].fuel_type;
     double unit_price = fuels[ftype].price;
 
-    /* choose quantity or amount */
     int mode;
     printf("Enter input mode: 0=Quantity, 1=Amount: ");
     if (scanf("%d", &mode) != 1 || (mode != 0 && mode != 1)) {
@@ -367,14 +306,12 @@ void process_sale() {
         qty = amt / unit_price;
     }
 
-    /* Check stock */
     if (qty > fuels[ftype].current_stock) {
         printf("Insufficient stock. Available: %.3f units.\n", fuels[ftype].current_stock);
         clear_input_buffer();
         return;
     }
 
-    /* Payment mode */
     int paychoice;
     printf("Payment Mode: 0=Cash, 1=Credit Card, 2=Digital Wallet: ");
     if (scanf("%d", &paychoice) != 1 || paychoice < 0 || paychoice > 2) {
@@ -383,7 +320,6 @@ void process_sale() {
         return;
     }
 
-    /* Create transaction */
     Transaction tx;
     memset(&tx, 0, sizeof(tx));
     generate_txn_id(tx.txn_id, sizeof(tx.txn_id));
@@ -395,23 +331,17 @@ void process_sale() {
     tx.amount = amt;
     tx.payment_mode = (PaymentMode)paychoice;
 
-    /* Deduct stock */
     fuels[ftype].current_stock -= qty;
 
-    /* Update system state by recording transaction */
     record_transaction(&tx);
 
-    /* Print receipt */
     print_receipt(&tx);
 
-    /* Low stock check */
     check_low_stock_alerts();
 
-    /* clear any leftover input */
     clear_input_buffer();
 }
 
-/* Add new supply to a fuel */
 void add_supply() {
     printf("\nAdd supply to which fuel? 0=Petrol,1=Diesel,2=CNG: ");
     int f;
@@ -432,7 +362,6 @@ void add_supply() {
     clear_input_buffer();
 }
 
-/* Change pump status (active, inactive, maintenance) */
 void change_pump_status() {
     int pid;
     printf("Enter Pump ID to change status: ");
@@ -455,11 +384,10 @@ void change_pump_status() {
     clear_input_buffer();
 }
 
-/* Show pump-wise performance */
 void show_pump_performance() {
     printf("\n----- Pump-wise Performance -----\n");
     for (int i = 0; i < PUMP_COUNT; ++i) {
-        printf("Pump %d | Fuel: %s | Status: %s | Txns: %d | Qty: %.3f | Revenue: ₹%.2f\n",
+        printf("Pump %d | Fuel: %s | Status: %s | Txns: %.0f | Qty: %.3f | Revenue: ₹%.2f\n",
                pumps[i].pump_id,
                fuel_name(pumps[i].fuel_type),
                pump_status_name(pumps[i].status),
@@ -469,7 +397,6 @@ void show_pump_performance() {
     }
 }
 
-/* Show fuel-wise summary */
 void show_fuel_summary() {
     printf("\n----- Fuel-wise Summary -----\n");
     for (int i = 0; i < 3; ++i) {
@@ -482,7 +409,6 @@ void show_fuel_summary() {
     }
 }
 
-/* Show hour-wise sales analysis */
 void show_hour_wise_analysis() {
     printf("\n----- Hour-wise Sales Analysis -----\n");
     for (int h = 0; h < 24; ++h) {
@@ -491,7 +417,6 @@ void show_hour_wise_analysis() {
     }
 }
 
-/* Show payment mode breakdown */
 void show_payment_breakdown() {
     printf("\n----- Payment Mode Breakdown -----\n");
     printf("Cash: ₹%.2f\n", payment_mode_amount[PAY_CASH]);
@@ -499,10 +424,8 @@ void show_payment_breakdown() {
     printf("Digital Wallet: ₹%.2f\n", payment_mode_amount[PAY_WALLET]);
 }
 
-/* Generate daily report */
 void generate_daily_report() {
     printf("\n================= DAILY REPORT =================\n");
-    /* Opening and closing stocks */
     printf("Fuel Opening & Closing Stocks:\n");
     for (int i = 0; i < 3; ++i) {
         fuels[i].closing_stock = fuels[i].current_stock;
@@ -511,7 +434,6 @@ void generate_daily_report() {
                fuels[i].opening_stock,
                fuels[i].closing_stock);
     }
-    /* Total sales quantity and amount */
     double total_qty = 0.0, total_amt = 0.0;
     for (int i = 0; i < 3; ++i) {
         total_qty += fuel_wise_quantity[i];
@@ -519,20 +441,14 @@ void generate_daily_report() {
     }
     printf("Total Sales Quantity (all fuels): %.3f\n", total_qty);
     printf("Total Revenue (all fuels): ₹%.2f\n", total_amt);
-    /* Fuel-wise breakdown */
     show_fuel_summary();
-    /* Number of transactions */
     printf("Number of transactions: %zu\n", tx_count);
-    /* Cash/digital breakdown */
     show_payment_breakdown();
-    /* Pump-wise performance */
     show_pump_performance();
-    /* Hour-wise */
     show_hour_wise_analysis();
     printf("================================================\n");
 }
 
-/* List recent transactions (simple table) */
 void list_transactions() {
     if (tx_count == 0) { printf("No transactions yet.\n"); return; }
     printf("\n---- Transactions (most recent first) ----\n");
@@ -549,7 +465,6 @@ void list_transactions() {
     }
 }
 
-/* Print a sample receipt format to screen (for deliverable) */
 void print_sample_receipt_format() {
     printf("\n--- Sample Receipt Format ---\n");
     printf("Station: ABC Fuel Station\n");
@@ -567,7 +482,6 @@ void print_sample_receipt_format() {
     printf("-----------------------------\n");
 }
 
-/* System architecture & memory strategy printout (brief) */
 void print_system_architecture() {
     printf("\n--- System Architecture & Memory Strategy ---\n");
     printf("1. Data structures:\n");
@@ -581,7 +495,6 @@ void print_system_architecture() {
     printf("-----------------------------------------------\n");
 }
 
-/* Advantages discussion printed to console */
 void print_dynamic_allocation_advantages() {
     printf("\n--- Advantages of Dynamic Allocation for Transactions ---\n");
     printf("- Efficient initial memory usage (start small with calloc)\n");
@@ -591,7 +504,6 @@ void print_dynamic_allocation_advantages() {
     printf("-----------------------------------------------\n");
 }
 
-/* Show main menu */
 void show_main_menu() {
     printf("\n====== PETROL PUMP MANAGEMENT SYSTEM ======\n");
     printf("1. Process Sale (new transaction)\n");
@@ -610,8 +522,6 @@ void show_main_menu() {
     printf("Enter choice: ");
 }
 
-/* --------------------------- Main Program Loop --------------------------- */
-
 int main(void) {
     initialize_system();
 
@@ -623,7 +533,6 @@ int main(void) {
             printf("Invalid input. Try again.\n");
             continue;
         }
-        /* consume trailing newline to keep input state clean */
         clear_input_buffer();
         switch (choice) {
             case 1:
@@ -671,7 +580,6 @@ int main(void) {
         }
     }
 
-    /* unreachable, but keep for completeness */
     shutdown_system();
     return 0;
 }
