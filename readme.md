@@ -61,7 +61,7 @@ This project demonstrates:
 
 ## 🏗️ System Architecture
 
-![system architecture](PetrolPumpManagementSystem/system_architrcture.png)
+![system architecture](system_architrcture.png)
 
 ## 🧰 Tech Stack
 
